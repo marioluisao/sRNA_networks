@@ -1,0 +1,28 @@
+PARS$input.dir <- '../Input_files/Ecoli_8sRNAs'
+PARS$exp.mat.file <- 'm3_unaveraged_sRNAfiltered.RData'
+PARS$tf.names.file <- 'tfs_plus_sRNAs_strong.csv'
+#PARS$meta.data.file <- 'meta.data.RData'
+#PARS$priors.file <- 'inf_gs_strong_0918.csv'
+#PARS$gold.standard.file <- 'inf_gs_strong_0918.csv'
+
+PARS$num.boots <- 20
+PARS$cores <- 8
+
+PARS$delT.max <- 60
+PARS$delT.min <- 15
+PARS$tau <- 15
+
+PARS$perc.tp <- 100
+PARS$perm.tp <- 1
+PARS$perc.fp <- 0
+PARS$perm.fp <- 1
+
+PARS$eval.on.subset <- TRUE
+
+PARS$method <- 'BBSR'
+PARS$use.tfa <- FALSE
+PARS$prior.weight <- 0
+
+PARS$output.summary <- FALSE
+
+PARS$save.to.dir <- 'output/Ecoli_without_regulators_priors'
