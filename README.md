@@ -19,7 +19,7 @@ This code is also available at: https://github.com/ChristophH/Inferelator
 
 **3.	Inferelator_output_files:** it contains all the networks inferred with the *Inferelator* (but the ones with noisy *E. coli*  priors). Each output folder contains three files: regression coefficients (betas_\*.RData files), confidence scores (combined_conf\*.RData files) and the parameters and input file (params_and_input.RData).
 
-**4.	Miscellaneous_scripts:** it contains multiple R scripts that can be used to generate input files and to analyze the output of the *Inferelator*. 
+**4.	Miscellaneous_scripts:** it contains multiple R scripts that can be used to analyze the output of the *Inferelator*. 
 
 *Finally, this repository includes an R notebook with the code for post-inference analyses.* 
 
