@@ -1,0 +1,602 @@
+---
+title: "Computational analyses for *Inference of bacterial small RNA regulatory networks and integration with transcription factor driven regulatory networks*"
+output: html_notebook
+author: Mario Arrieta-Ortiz
+date: November 24, 2019
+---
+0. Load required libraries
+```{r message=FALSE}
+library(ggplot2)
+library(Hmisc)
+library(multtest)
+library(network)
+library(igraph)
+```
+1a. Examine the relation between the transcription of bacterial sRNAs and their regulatory activities - Part I (Fig 1)
+```{r}
+#Name of sRNAs shown in Fig 1 A-B
+fig1.sRNAs<-c("spf","ryhB")
+#Load the output of the Inferelator run
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Extract expression response and design matrices
+expression.response.matrix<-IN$final_response_matrix
+expression.design.matrix<-IN$final_design_matrix
+#This is the gold standard (prior) network
+gs.matrix<-IN$gs.mat
+#Matrix with regulators (TFs & sRNAs) activities
+regulators.activities.matrix<-IN$tf.activities[[1]]
+par(mfrow=c(1,2))
+for(i in fig1.sRNAs)
+{
+  sRNA.activities<-regulators.activities.matrix[grep(i,rownames(regulators.activities.matrix)),]
+  sRNA.transcriptional.profile<-expression.design.matrix[grep(i,rownames(expression.design.matrix)),]
+  sRNA.priors<-rownames(gs.matrix)[which(gs.matrix[,grep(i,colnames(gs.matrix))]!=0)]
+  sRNA.regulon.expression<-expression.response.matrix[sRNA.priors,]
+  mean.expression.sRNA.regulon<-colMeans(sRNA.regulon.expression)
+  plot(x=sRNA.transcriptional.profile,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab=paste(i,"transcription",sep=" "),ylab="Mean transcription of targets",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+  #Perform linear regression
+  lr.sRNA.exp.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.transcriptional.profile))
+  abline(lr.sRNA.exp.regulon,col="darkred",lwd=3,lty=2)
+  plot(x=sRNA.activities,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab=paste(capitalize(i),"activity",sep=" "),ylab="",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+  #Perform linear regression
+  lr.sRNA.activity.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.activities))
+  abline(lr.sRNA.activity.regulon,col="darkred",lwd=3,lty=2)
+}
+#Create similar figure for FnrS activity (its transcriptional profile is not present in the expression matrix) 
+  sRNA.activities<-regulators.activities.matrix[grep("FnrS",rownames(regulators.activities.matrix)),]
+  sRNA.priors<-rownames(gs.matrix)[which(gs.matrix[,grep("FnrS",colnames(gs.matrix))]!=0)]
+  sRNA.regulon.expression<-expression.response.matrix[sRNA.priors,]
+  mean.expression.sRNA.regulon<-colMeans(sRNA.regulon.expression)
+  plot(x=sRNA.activities,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab="FnrS activity",ylab="Mean transcription of targets",cex=1.5, cex.lab=1.5,cex.axis=1.5, main="Fig 1D")
+  #Perform linear regression
+  lr.sRNA.activity.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.activities))
+  abline(lr.sRNA.activity.regulon,col="darkred",lwd=3,lty=2)
+  #Create Fig 1C
+  #Define correlation between sRNAs and their priors
+  sRNAs<-colnames(IN$priors.mat)[140:147]
+  correlation.sRNA.activities.targets.expression<-c()
+  correlation.sRNA.expression.targets.expression<-c()
+  for(t in sRNAs[-8])
+  {
+    sRNA.activities<-regulators.activities.matrix[t,]
+    sRNA.expression<-expression.design.matrix[t,]
+    sRNA.priors<-names(which(gs.matrix[,t]!=0))
+    for(g in sRNA.priors)
+    {
+    correlation.sRNA.activities.targets.expression<-c(correlation.sRNA.activities.targets.expression,
+                                                      cor(sRNA.activities,expression.response.matrix[g,]))
+    correlation.sRNA.expression.targets.expression<-c(correlation.sRNA.expression.targets.expression,
+                                                      cor(sRNA.expression,expression.response.matrix[g,]))  
+    }
+  }
+temporal.matrix<-rbind(cbind(correlation.sRNA.expression.targets.expression,rep("Expression",length(correlation.sRNA.expression.targets.expression))),cbind(correlation.sRNA.activities.targets.expression,rep("Activity",length(correlation.sRNA.activities.targets.expression))))
+temporal.matrix<-as.data.frame(temporal.matrix)
+colnames(temporal.matrix)<-c("PearsonCorrelation","Type")
+temporal.matrix$PearsonCorrelation<-as.numeric(as.vector(temporal.matrix$PearsonCorrelation))
+p <- ggplot(temporal.matrix, aes(x=Type, y=PearsonCorrelation,fill=Type)) + geom_violin()
+p + stat_summary(fun.y=median, geom="point", size=2, color="purple") + ggtitle("Fig 1C")
+```
+
+1b. Examine the relation between the transcription of bacterial sRNAs and their regulatory activities - Part II (Fig S1)
+```{r}
+#Create Fig S1A-E
+other.ecoli.sRNAs<-c("cyaR","micA","gcvB","omrA","rybB")
+#Load the output of the Inferelator
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Extract expression response and design matrices
+expression.response.matrix<-IN$final_response_matrix
+expression.design.matrix<-IN$final_design_matrix
+gs.matrix<-IN$gs.mat
+regulators.activities.matrix<-IN$tf.activities[[1]]
+par(mfrow=c(1,2))
+for(i in other.ecoli.sRNAs)
+{
+  sRNA.activities<-regulators.activities.matrix[grep(i,rownames(regulators.activities.matrix)),]
+  sRNA.transcriptional.profile<-expression.design.matrix[grep(i,rownames(expression.design.matrix)),]
+  sRNA.priors<-rownames(gs.matrix)[which(gs.matrix[,grep(i,colnames(gs.matrix))]!=0)]
+  sRNA.regulon.expression<-expression.response.matrix[sRNA.priors,]
+  mean.expression.sRNA.regulon<-colMeans(sRNA.regulon.expression)
+  plot(x=sRNA.transcriptional.profile,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab=paste(i,"transcription",sep=" "),ylab="Mean transcription of targets",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+  #Perform linear regression
+  lr.sRNA.exp.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.transcriptional.profile))
+  abline(lr.sRNA.exp.regulon,col="darkred",lwd=3,lty=2)
+  plot(x=sRNA.activities,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab=paste(capitalize(i),"activity",sep=" "),ylab="",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+  #Perform linear regression
+  lr.sRNA.activity.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.activities))
+  abline(lr.sRNA.activity.regulon,col="darkred",lwd=3,lty=2)
+}
+#Create Fig S1F
+#Load B. subtilis run
+load("../Inferelator_output_files/FsrA_Bsubtilis/params_and_input.RData")
+load("../Inferelator_output_files/FsrA_Bsubtilis/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/FsrA_Bsubtilis/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+#Extract expression response and design matrices
+expression.response.matrix<-IN$final_response_matrix
+expression.design.matrix<-IN$final_design_matrix
+gs.matrix<-IN$gs.mat
+regulators.activities.matrix<-IN$tf.activities[[1]]
+FsrA<-"new_1483539_1483640"
+sRNA.activities<-regulators.activities.matrix[FsrA,]
+sRNA.transcriptional.profile<-expression.design.matrix[FsrA,]
+sRNA.priors<-rownames(gs.matrix)[which(gs.matrix[,FsrA]!=0)]
+sRNA.regulon.expression<-expression.response.matrix[sRNA.priors,]
+mean.expression.sRNA.regulon<-colMeans(sRNA.regulon.expression)
+plot(x=sRNA.transcriptional.profile,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab="fsrA transcription",ylab="Mean transcription of targets",cex=1.5, cex.lab=1.5,cex.axis=1.5, main="Fig S1F")
+#Perform linear regression
+lr.sRNA.exp.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.transcriptional.profile))
+abline(lr.sRNA.exp.regulon,col="darkred",lwd=3,lty=2)
+plot(x=sRNA.activities,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab="FsrA activity",ylab="",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+#Perform linear regression
+lr.sRNA.activity.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.activities))
+abline(lr.sRNA.activity.regulon,col="darkred",lwd=3,lty=2)
+#Create Fig S1F
+#Load S. aureus run
+load("../Inferelator_output_files/RsaE_Saureus/params_and_input.RData")
+load("../Inferelator_output_files/RsaE_Saureus/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/RsaE_Saureus/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+#Extract expression response and design matrices
+expression.response.matrix<-IN$final_response_matrix
+expression.design.matrix<-IN$final_design_matrix
+gs.matrix<-IN$gs.mat
+regulators.activities.matrix<-IN$tf.activities[[1]]
+RsaE<-"new_911368_911465_1"
+sRNA.activities<-regulators.activities.matrix[RsaE,]
+sRNA.transcriptional.profile<-expression.design.matrix[RsaE,]
+sRNA.priors<-rownames(gs.matrix)[which(gs.matrix[,RsaE]!=0)]
+sRNA.regulon.expression<-expression.response.matrix[sRNA.priors,]
+mean.expression.sRNA.regulon<-colMeans(sRNA.regulon.expression)
+plot(x=sRNA.transcriptional.profile,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab="rsaE transcription",ylab="Mean transcription of targets",cex=1.5, cex.lab=1.5,cex.axis=1.5, main="Fig S1G")
+#Perform linear regression
+lr.sRNA.exp.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.transcriptional.profile))
+abline(lr.sRNA.exp.regulon,col="darkred",lwd=3,lty=2)
+plot(x=sRNA.activities,y=mean.expression.sRNA.regulon,col=rgb(1,0,0,1),lwd=1,xlab="RsaE activity",ylab="",cex=1.5, cex.lab=1.5,cex.axis=1.5)
+#Perform linear regression
+lr.sRNA.activity.regulon<-lm(mean.expression.sRNA.regulon ~ as.numeric(sRNA.activities))
+abline(lr.sRNA.activity.regulon,col="darkred",lwd=3,lty=2)
+```
+2a. Evaluate performance of the Inferelator and CLR with and without sRNA activities (Fig 3A)
+```{r}
+#Plot performance of the Inferelator with sRNA activities
+#Load the output files of the Inferelator run for E. coli
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Normalize confidence score matrix
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Save the names of sRNAs to be considered in this analysis (FnrS is not included)
+sRNAs<-colnames(IN$priors.mat)[140:146]
+#Create matrix with normalized confidence score for selected sRNAs
+normalized.confidence.matrix.sRNAs<-normalized.confidence.matrix[,sRNAs]
+#Convert sRNA priors to zeroes in the normalized confidence score matrix
+normalized.confidence.matrix.sRNAs[which(IN$priors.mat[,sRNAs]!=0)]<-0
+#Run script to read all candidate sRNA targets supported by experimental data and genomic location (operons)
+source("../Miscellaneous_scripts/sRNA_candidate_targets_compilation.R")
+#Create vector to save number of supported priors at different ranking positions per sRNA 
+performance.inferelator.sRNA.activity<-c()
+for(y in 1:100)
+{
+total.supported.predictions<-0
+for(s in colnames(normalized.confidence.matrix.sRNAs))
+{
+  candidate.targets<-unique(expanded.sRNA.gs[which(expanded.sRNA.gs[,1]== s),2])
+  top.targets<-rownames(normalized.confidence.matrix.sRNAs)[order(normalized.confidence.matrix.sRNAs[,s],decreasing=T)[1:y]]
+  #Keep only the loci tags
+  top.targets<-translate.names(top.targets)
+  total.supported.predictions <- total.supported.predictions + length(intersect(candidate.targets,top.targets))
+}
+performance.inferelator.sRNA.activity<-c(performance.inferelator.sRNA.activity,total.supported.predictions)
+}
+plot(x=1:100, y=performance.inferelator.sRNA.activity,ylim=c(0,72),xlab="Targets per sRNA",ylab="Supported predictions",col="dark green",type="lines",lwd=2,cex=1.5,cex.lab=1.5,cex.axis=1.5)
+#Plot performance of CLR without sRNA activities (sRNA expression instead) using script in the folder of the Inferelator code 
+source("../Inferelator_2015.08.05/R_scripts/mi_and_clr.R")
+#Remove FnrS from the set of potential regulators
+regulators.names<-IN$tf.names[-147]
+X<-IN$final_design_matrix[regulators.names,]
+#This is the same IN$final_response_matrix because we did not use a metadata file (for time series) 
+Y<-IN$final_response_matrix_halftau 
+#Calculate mutual information (MI) as done in the Inferelator
+Ms <- mi(t(Y), t(X), nbins=PARS$mi.bins, cpu.n=PARS$cores)  
+diag(Ms) <- 0
+Ms_bg <- mi(t(X), t(X), nbins=PARS$mi.bins, cpu.n=PARS$cores)
+diag(Ms_bg) <- 0
+#Calculate CLR
+clr.matrix = mixedCLR(Ms_bg,Ms)
+dimnames(clr.matrix) <- list(rownames(Y), rownames(X))
+#Names of sRNA to be considered in this analysis (FnrS is not included)
+sRNAs<-colnames(IN$priors.mat)[140:146]
+#Create matrix with normalized CLR scores for selected sRNAs
+clr.matrix.sRNAs<-clr.matrix[,sRNAs]
+performance.clr.sRNA.exp<-c()
+for(y in 1:100)
+{
+total.supported.predictions<-0
+for(s in colnames(clr.matrix.sRNAs))
+{
+  candidate.targets<-unique(expanded.sRNA.gs[which(expanded.sRNA.gs[,1]== s),2])
+  top.targets<-rownames(clr.matrix.sRNAs)[order(clr.matrix.sRNAs[,s],decreasing=T)[1:y]]
+  top.targets<-translate.names(top.targets)
+  total.supported.predictions <- total.supported.predictions + length(intersect(candidate.targets,top.targets))
+}
+performance.clr.sRNA.exp<-c(performance.clr.sRNA.exp,total.supported.predictions)
+}
+lines(x=1:100, y=performance.clr.sRNA.exp,col="orange",lwd=2)
+#Plot performance of CLR with sRNA activities
+X<-IN$tf.activities[[1]]
+Y<-IN$final_response_matrix_halftau
+#Calculate mutual information (MI) as done in the Inferelator
+Ms <- mi(t(Y), t(X), nbins=PARS$mi.bins, cpu.n=PARS$cores)  
+diag(Ms) <- 0
+Ms_bg <- mi(t(X), t(X), nbins=PARS$mi.bins, cpu.n=PARS$cores)
+diag(Ms_bg) <- 0
+#Calculate CLR
+clr.matrix = mixedCLR(Ms_bg,Ms)
+dimnames(clr.matrix) <- list(rownames(Y), rownames(X))
+#Create matrix with normalized clr scores for selected sRNAs
+clr.matrix.sRNAs<-clr.matrix[,sRNAs]
+#Convert sRNA priors to zeroes in the CLR matrix
+clr.matrix.sRNAs[which(IN$priors.mat[,sRNAs]!=0)]<-0
+performance.clr.sRNA.act<-c()
+for(y in 1:100)
+{
+total.supported.predictions<-0
+for(s in colnames(clr.matrix.sRNAs))
+{
+  candidate.targets<-unique(expanded.sRNA.gs[which(expanded.sRNA.gs[,1]== s),2])
+  top.targets<-rownames(clr.matrix.sRNAs)[order(clr.matrix.sRNAs[,s],decreasing=T)[1:y]]
+  top.targets<-translate.names(top.targets)
+  total.supported.predictions <- total.supported.predictions + length(intersect(candidate.targets,top.targets))
+}
+performance.clr.sRNA.act<-c(performance.clr.sRNA.act,total.supported.predictions)
+}
+lines(x=1:100, y=performance.clr.sRNA.act,col="blue",lwd=2)
+#Plot performance of the Inferelator without sRNA activities (no TF or sRNA priors were specified)
+#Load Inferelator output
+load("../Inferelator_output_files/Ecoli_without_regulators_priors/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_0.RData")
+load("../Inferelator_output_files/Ecoli_without_regulators_priors/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_0.RData")
+load("../Inferelator_output_files/Ecoli_without_regulators_priors/params_and_input.RData")
+#Create matrix with normalized confidence score for selected sRNAs
+normalized.confidence.matrix<-normalization(as.matrix(comb.confs))
+normalized.confidence.matrix.sRNAs<-normalized.confidence.matrix[,sRNAs]
+performance.inferelator.sRNA.exp<-c()
+for(y in 1:100)
+{
+total.supported.predictions<-0
+for(s in colnames(normalized.confidence.matrix.sRNAs))
+{
+  candidate.targets<-unique(expanded.sRNA.gs[which(expanded.sRNA.gs[,1]== s),2])
+  top.targets<-rownames(normalized.confidence.matrix.sRNAs)[order(normalized.confidence.matrix.sRNAs[,s],decreasing=T)[1:y]]
+  top.targets<-translate.names(top.targets)
+  total.supported.predictions <- total.supported.predictions + length(intersect(candidate.targets,top.targets))
+}
+performance.inferelator.sRNA.exp<-c(performance.inferelator.sRNA.exp,total.supported.predictions)
+}
+lines(x=1:100, y=performance.inferelator.sRNA.exp,col="purple",lwd=2)
+#Plot performance of the Inferelator with sRNA activities and shuffled sRNA priors
+performance.inferelator.shuffled.sRNA.priors<-c()
+for(r in 1:10)
+{
+  shuffled.path<-paste("../Inferelator_output_files/Ecoli_shuffled_sRNA_priors/Ecoli_shuffled_sRNA_priors",r,"/",sep="")
+  #Load Inferelator output files
+  load(paste(shuffled.path,"combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData",sep=""))
+  load(paste(shuffled.path,"params_and_input.RData",sep=""))
+  load(paste(shuffled.path,"betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData",sep=""))
+  #Create matrix with normalized confidence score for selected sRNAs
+  normalized.confidence.matrix.shuffled.priors<-normalization(as.matrix(comb.confs))
+  normalized.confidence.matrix.shuffled.priors.sRNAs<-normalized.confidence.matrix.shuffled.priors[,sRNAs]
+  #Convert sRNA priors to zeroes in the normalized confidence score matrix
+  normalized.confidence.matrix.shuffled.priors.sRNAs[which(IN$priors.mat[,sRNAs]!=0)]<-0
+  temporal.performance<-c()
+  for(y in 1:100)
+  {
+  total.supported.predictions<-0
+  for(s in colnames(clr.matrix.sRNAs))
+  {
+  candidate.targets<-unique(expanded.sRNA.gs[which(expanded.sRNA.gs[,1]== s),2])
+  top.targets<-rownames(normalized.confidence.matrix.shuffled.priors.sRNAs)[order(normalized.confidence.matrix.shuffled.priors.sRNAs[,s],decreasing=T)[1:y]]
+  top.targets<-translate.names(top.targets)
+  total.supported.predictions <- total.supported.predictions + length(intersect(candidate.targets,top.targets))
+  }
+  temporal.performance<-c(temporal.performance,total.supported.predictions)
+  }
+  performance.inferelator.shuffled.sRNA.priors<-rbind(performance.inferelator.shuffled.sRNA.priors,temporal.performance)
+  }
+  lines(x=1:100, y=colMeans(performance.inferelator.shuffled.sRNA.priors),col="dark grey",lwd=2)
+  legend("topleft",inset=0.03,box.lty=0.1,box.lwd=0.2,c("BBSR.SRA","BBSR.SRA.Shuffled","BBSR","CLR.SRA","CLR"),col=c("dark green","dark grey","purple","blue","orange"),cex=0.65,lty=1,lwd=2)
+```
+2b. Visually inspect the infered E.coli sRNA network. Fig 3B was created in Cytoscape. Here we use the igraph package to get a raw draft.
+```{r}
+#Load the output files of the Inferelator run for E. coli
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Create table with sRNA-mRNA interactions for all eight sRNAs
+sRNAs<-colnames(IN$priors.mat)[140:147]
+#Function to remove the loci part of gene IDs used in expression, confidence score and betas matrices
+remove.locus.tag<-function(geneNames)
+{
+  output<-sapply(1:length(geneNames),function(x){strsplit(as.character(geneNames)[x],split = "_")[[1]][1]})
+  output
+}
+#Function to create the sRNA network - it uses final network model created above
+create.network<-function(regulatorsNames,recoveredInteractionsMatrix,novelInteractionsMatrix,betas)
+{
+output.network<-c()
+for(g in regulatorsNames)
+{
+  recovered.targets<-names(which(recoveredInteractionsMatrix[,g]!=0))
+  novel.targets<-names(which(novelInteractionsMatrix[,g]!=0))
+  g<-remove.locus.tag(g)
+  if(length(recovered.targets)>0)
+  {
+  
+  output.network<-rbind(output.network,cbind(rep(g,length(recovered.targets)),remove.locus.tag(recovered.targets)
+                                         ,rep("prior",length(recovered.targets))))
+  }
+  if(length(novel.targets)>0)
+  {
+  output.network<-rbind(output.network,cbind(rep(g,length(novel.targets)),remove.locus.tag(novel.targets)
+                                         ,rep("novel",length(novel.targets))))
+  }
+}
+colnames(output.network)<-c("Regulator","Target","Interaction")
+output.network
+}
+sRNAs.network<-create.network(sRNAs,recovered.interactions.matrix,novel.interactions.matrix)
+sRNA.network.igraph.format<-graph_from_data_frame(sRNAs.network[,c("Regulator","Target")]
+                                                  ,union(sRNAs.network[,"Regulator"],sRNAs.network[,"Target"]), directed = T)
+selected.network.layout <- layout_nicely(sRNA.network.igraph.format)
+plot(sRNA.network.igraph.format,layout = selected.network.layout, edge.arrow.size =0.2,vertex.label.cex=0.3,vertex.size=9,main="Fig 3B draft")
+```
+2c. Compare the regression coefficients (betas) of sRNA-mRNA and TF-gene interactions (Fig 3C)
+```{r}
+betas.tfs<-c()
+betas.sRNAs<-c()
+#Save TFs names
+TFs<-setdiff(colnames(normalized.confidence.matrix),sRNAs)
+#Combined recovered and novel interactions in a single matrix
+all.predictions.matrix<-recovered.interactions.matrix + novel.interactions.matrix
+betas.tfs<-abs(combined.betas[,TFs][which(all.predictions.matrix[,TFs]!=0)])
+betas.sRNAs<-abs(combined.betas[,sRNAs][which(all.predictions.matrix[,sRNAs]!=0)])
+temporal.matrix<-rbind(cbind(betas.tfs,rep("TFs",length(betas.tfs))),cbind(betas.sRNAs,rep("sRNAs",length(betas.sRNAs))))
+colnames(temporal.matrix)<-c("Betas","Type")
+temporal.matrix<-as.data.frame(temporal.matrix)
+temporal.matrix$Betas<-as.numeric(as.vector(temporal.matrix$Betas))
+p <- ggplot(temporal.matrix, aes(x=Type, y=Betas,fill=Type)) + geom_violin(show.legend = F)
+p + stat_summary(fun.y=median, geom="point", size=2,show.legend = F) + coord_flip()
+```
+2d. Plot experimental support of the inferred E. coli sRNA regulons (Fig 3D)
+```{r}
+#This figure is generated using data in Supplementary Dataset 1
+accuracy.sRNA.regulons<-c()
+accuracy.CyaR.regulon<-cbind(c(6,1,7,0),c(0,4,4,0)) 
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.CyaR.regulon)
+accuracy.FnrS.regulon<-cbind(c(7,1,8,0),c(0,6,6,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.FnrS.regulon)
+accuracy.GcvB.regulon<-cbind(c(6,16,22,0),c(0,11,11,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.GcvB.regulon)
+accuracy.OmrA.regulon<-cbind(c(4,1,5,0),c(0,0,0,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.OmrA.regulon)
+accuracy.RybB.regulon<-cbind(c(5,0,5,0),c(0,3,3,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.RybB.regulon)
+accuracy.RyhB.regulon<-cbind(c(6,5,11,0),c(0,8,8,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.RyhB.regulon)
+accuracy.Spot42.regulon<-cbind(c(4,5,9,0),c(0,0,0,0))
+accuracy.sRNA.regulons<-rbind(accuracy.sRNA.regulons,accuracy.Spot42.regulon)
+#Create barplot
+barplot(t(accuracy.sRNA.regulons),col=rep(c(rgb(90,180,172,maxColorValue = 255),rgb(216,179,101,maxColorValue = 255)),28)
+        ,names=rep(c("Known","Novel","Full",""),7),las=2,cex.axis = 1.25,ylab="# Targets")
+legend("topleft", 
+       legend = c("Supported", "Not Supported"), 
+       fill = c(rgb(90,180,172,maxColorValue = 255),rgb(216,179,101,maxColorValue = 255)),bty="n")
+```
+2e. Plot performance of the Inferelator with noisy sRNA priors (Fig 3E & Fig S2) 
+```{r}
+#Load Inferelator run without noisy sRNA priors
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Create final model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Save manually selected sRNA priors used as input for the Inferelator
+original.sRNAs.gs<-IN$priors.mat[,sRNAs]
+#Recovered sRNA priors in the Inferelator run without noisy priors
+recovered.sRNA.priors.no.noise<-recovered.interactions.matrix[,sRNAs]
+#The ratio of true:false ratio in the noisy sRNA priors (1:1,1:2,1:5)
+noise.level<-c(1,2,5)
+#Create matrix to store average experimental support rate of recovered sRNA priors
+mean.support.rate.recovered.priors.matrix<-matrix(nrow=3,ncol=length(sRNAs)+1,0,dimnames = list(paste("n",noise.level,sep=""),c(sRNAs,"Random")))
+#The expected average ratio from  random selections
+mean.support.rate.recovered.priors.matrix[,9]<-c(1/2,1/3,1/6)
+#Create matrix to store average number of recovered sRNA priors
+mean.number.recovered.priors<-matrix(nrow=3,ncol=length(sRNAs),0,dimnames = list(paste("n",noise.level,sep=""),sRNAs))
+#Create matrix to store average number of experimentally supported recovered sRNA priors
+mean.number.true.recovered.priors<-matrix(nrow=3,ncol=length(sRNAs),0,dimnames = list(paste("n",noise.level,sep=""),sRNAs))
+#This loop computes the number of recovered priors and the exp. support rate of the recovered priors for the Inferelator runs that used noisy sRNA priors (ten runs for each noise level)  
+for(k in noise.level)
+{
+  #Create matrices to store the information of the ten Inferelator runs 
+  temporal.recovered.sRNA.priors.matrix<-matrix(nrow=10,ncol=length(sRNAs),0,dimnames = list(paste("r",1:10,sep=""),sRNAs))
+  temporal.recovered.true.sRNA.priors.matrix<-matrix(nrow=10,ncol=length(sRNAs),0,dimnames = list(paste("r",1:10,sep=""),sRNAs))
+  temporal.suppport.rate.recovered.sRNA.priors.matrix<-matrix(nrow=10,ncol=length(sRNAs),0,dimnames = list(paste("r",1:10,sep=""),sRNAs))
+  
+  for(r in 1:10)
+  {
+  path.to.noisy.inferelator.output<-"../Inferelator_output_files/Ecoli_noisy_sRNA_priors/eco_sRNA_strong_m3F_unaveraged_noisyPriors_n"
+  load(paste(path.to.noisy.inferelator.output,k,"_r",r,"/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData",sep=""))
+  load(paste(path.to.noisy.inferelator.output,k,"_r",r,"/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData",sep=""))
+  load(paste(path.to.noisy.inferelator.output,k,"_r",r,"/params_and_input.RData",sep=""))
+  source("../Miscellaneous_scripts/create_final_networks.R")
+  for(s in sRNAs)
+  {
+    true.sRNA.priors<-names(which(original.sRNAs.gs[,s]!=0))
+    #The curated.gs.matrix object was created by the create_final_networks.R script used above
+    noisy.sRNA.priors<-names(which(curated.gs.matrix[,s]!=0))
+    #The recovered.sRNA.priors object was created by the create_final_networks.R script used above
+    recovered.sRNA.priors<-names(which(recovered.interactions.matrix[,s]!=0))
+    temporal.recovered.sRNA.priors.matrix[paste("r",r,sep=""),s]<-length(recovered.sRNA.priors)
+    temporal.recovered.true.sRNA.priors.matrix[paste("r",r,sep=""),s]<-length(intersect(recovered.sRNA.priors,true.sRNA.priors))
+    temporal.suppport.rate.recovered.sRNA.priors.matrix[paste("r",r,sep=""),s]<-temporal.recovered.true.sRNA.priors.matrix[paste("r",r,sep=""),s]/length(recovered.sRNA.priors)
+  }
+  }
+  #Compute average acrros the ten runs
+  mean.number.recovered.priors[paste("n",k,sep=""),1:8]<-colMeans(temporal.recovered.sRNA.priors.matrix,na.rm = T)
+  mean.number.true.recovered.priors[paste("n",k,sep=""),1:8]<-colMeans(temporal.recovered.true.sRNA.priors.matrix,na.rm=T)
+  mean.support.rate.recovered.priors.matrix[paste("n",k,sep=""),1:8]<-colMeans(temporal.suppport.rate.recovered.sRNA.priors.matrix,na.rm=T)
+}
+par(mfrow=c(1,1))
+boxplot(ylim=c(0,1),t(mean.support.rate.recovered.priors.matrix),col="white",outline=F,boxlty=0,whisklty = 0, staplelty = 0, names=c("1:1","1:2","1:5"),frame=F,
+  xlab="Supported : Unsupported priors",ylab="Proportion of recovered priors w/ support",cex.lab=1.1,main="Fig 3E")
+dots.colors<-c("blue","red","dark green","deeppink","orange","cyan","purple","brown","gray")
+dots.shapes<-c(2,1,3:6,0,7,8)
+for(r in 1:(length(sRNAs)+1))
+{
+ points(y=mean.support.rate.recovered.priors.matrix[,r],x=c(1,2,3),pch=dots.shapes[r],col=dots.colors[r])
+}
+legend("bottomleft",inset=0.03,box.lty=0.1,box.lwd=0.2,
+  c("RyhB(12)","Spot42(12)","GcvB(9)","MicA(10)","OmrA(6)","CyaR(6)","RybB(10)","FnrS(10)","Random"),col=dots.colors,cex=0.65,pch=dots.shapes)
+#Create Fig S2 (because MicA targets were not predicted in the original run- we remove MicA from the following analysis)
+sRNAs.figS2<-sRNAs[-4]
+par(mfrow=c(1,2))
+#Panel A
+boxplot(ylim=c(0,1.2),t(mean.number.recovered.priors[,sRNAs.figS2])/colSums(abs(recovered.sRNA.priors.no.noise[,sRNAs.figS2])),col="white",outline=F,boxlty=0,whisklty = 0, staplelty = 0, names=c("1:1","1:2","1:5"),frame=F,xlab="Supported : Unsupported priors",ylab="Total recovered priors (compared to run w/out false priors)",cex.lab=1.1,main="Fig S2A")
+for(x in 1:(length(sRNAs.figS2)))
+{
+ points(y=mean.number.recovered.priors[,sRNAs.figS2[x]]/sum(abs(recovered.sRNA.priors.no.noise[,sRNAs.figS2[x]])),x=c(1,2,3),pch=dots.shapes[-4][x],col=dots.colors[-4][x])
+}
+#Panel B
+boxplot(ylim=c(0,1.2),t(mean.number.true.recovered.priors[,sRNAs.figS2])/colSums(abs(recovered.sRNA.priors.no.noise[,sRNAs.figS2])),col="white",outline=F,boxlty=0,whisklty = 0, staplelty = 0, names=c("1:1","1:2","1:5"),frame=F,xlab="Supported : Unsupported priors",ylab="True recovered priors (compared to no false priors run)",cex.lab=1.1,main="Fig S2B")
+for(x in 1:(length(sRNAs.figS2)))
+{
+ points(y=mean.number.true.recovered.priors[,sRNAs.figS2[x]]/sum(abs(recovered.sRNA.priors.no.noise[,sRNAs.figS2[x]])),x=c(1,2,3),pch=dots.shapes[-4][x],col=dots.colors[-4][x])
+}
+legend("topright",inset=0.03,box.lty=0.1,box.lwd=0.2,
+  c("RyhB(12)","Spot42(12)","GcvB(9)","OmrA(6)","CyaR(6)","RybB(10)","FnrS(10)"),cex=0.65,pch=dots.shapes[1:8][-4],col=dots.colors[1:8][-4])
+```
+3. Inspect sRNA regulons inferred using CopraRNA (Wrigth et al. 2013) sRNA priors (Fig 4)
+```{r}
+#Create Fig 4B using Table S2
+copraRNA.100.support.rate<-c(.29,.3,.17)
+copraRNA.100.recovered.priors.support.rate<-c(1,.67,.33)
+copraRNA.pval.support.rate<-c(.35,.46,.22)
+copraRNA.pval.recovered.priors.support.rate<-c(.4,.82,.25)
+copraRNA.enriched.support.rate<-c(.5,.56,.26)
+copraRNA.enriched.recovered.priors.support.rate<-c(1,.82,.4)
+copraRNA.top15.support.rate<-c(.48,.64,.31)
+copraRNA.top15.recovered.priors.support.rate<-c(1,.8,.5)
+copraRNA.AND.support.rate<-c(.55,.73,.35)
+copraRNA.AND.recovered.priors.support.rate<-c(1,.77,.67)
+copraRNA.OR.support.rate<-c(.37,.41,.2)
+copraRNA.OR.recovered.priors.support.rate<-c(1,.8,.29)
+copraRNA.support.rate<-c(copraRNA.100.support.rate,copraRNA.pval.support.rate,copraRNA.enriched.support.rate,
+                         copraRNA.top15.support.rate,copraRNA.AND.support.rate,copraRNA.OR.support.rate)
+copraRNA.recovered.priors.support.rate<-c(copraRNA.100.recovered.priors.support.rate,copraRNA.pval.recovered.priors.support.rate,
+                                          copraRNA.enriched.recovered.priors.support.rate,copraRNA.top15.recovered.priors.support.rate,
+                                          copraRNA.AND.recovered.priors.support.rate,copraRNA.OR.recovered.priors.support.rate)
+
+plot(x=copraRNA.support.rate,y=copraRNA.recovered.priors.support.rate,col=rep(c("purple","green","orange"),6),xlab="Experimental support rate - CopraRNA priors",ylab="Experimental support rate - Recovered priors",xlim=c(0,1),ylim=c(0,1),
+     pch=rep(c(15,16,17,18,19,4),each=3))
+lines(x=c(0,1),y=c(0,1),col="red",lty=2)
+legend('bottomright', c("RyhB","GcvB","Spot 42"), col=c("purple","green","orange"),pch=16,bty="n")
+#Plot the inferred RyhB regulon when CopraRNA predictions associated with enriched functional terms were used as priors (Fig 4C)
+#Here we use the igraph package to get  raw drafts
+#Load the output files of the corresponding Inferelator run
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/ryhB_silico_2_BBSR_1.1_100_0/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/ryhB_silico_2_BBSR_1.1_100_0/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/ryhB_silico_2_BBSR_1.1_100_0/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Save the inferred RyhB regulon
+RyhB.regulon<-create.network("ryhB_b4451_4",recovered.interactions.matrix,novel.interactions.matrix)
+RyhB.regulon.igraph.format<-graph_from_data_frame(RyhB.regulon[,1:2], union(RyhB.regulon[,"Regulator"],RyhB.regulon[,"Target"]), directed = T)
+plot(RyhB.regulon.igraph.format,layout = layout_nicely(RyhB.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=1,vertex.size=30,main="Fig 4C",vertex.shape=c("square",rep("circle",nrow(RyhB.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",RyhB.regulon[,3]))),rep("white",length(grep("novel",RyhB.regulon[,3])))))
+#Plot the inferred GcvB regulon when CopraRNA predictions with p-value <= 0.01 were used as priors (Fig 4D)
+#Load the output files of the corresponding Inferelator run
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/gcvB_silico_1_BBSR_1.1_100_0/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/gcvB_silico_1_BBSR_1.1_100_0/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/gcvB_silico_1_BBSR_1.1_100_0/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Save the inferred GcvB regulon
+GcvB.regulon<-create.network("gcvB_b4443_12",recovered.interactions.matrix,novel.interactions.matrix)
+GcvB.regulon.igraph.format<-graph_from_data_frame(GcvB.regulon[,1:2], union(GcvB.regulon[,"Regulator"],GcvB.regulon[,"Target"]), directed = T)
+plot(GcvB.regulon.igraph.format,layout = layout_nicely(GcvB.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=0.8,vertex.size=21,main="Fig 4D",vertex.shape=c("square",rep("circle",nrow(GcvB.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",GcvB.regulon[,3]))),rep("white",length(grep("novel",GcvB.regulon[,3])))))
+#Plot the inferred Spot 42 regulon when CopraRNA predictions with p-value <= 0.01 & associated with enriched functional terms were used as priors (Fig 4E)
+#Load the output files of the corresponding Inferelator run
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/spf_silico_3_BBSR_1.1_100_0/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/spf_silico_3_BBSR_1.1_100_0/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_CopraRNA_sRNA_priors/spf_silico_3_BBSR_1.1_100_0/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Save the inferred Spot 42 regulon
+Spot42.regulon<-create.network("spf_b3864_15",recovered.interactions.matrix,novel.interactions.matrix)
+Spot42.regulon.igraph.format<-graph_from_data_frame(Spot42.regulon[,1:2], union(Spot42.regulon[,"Regulator"],Spot42.regulon[,"Target"]), directed = T)
+plot(Spot42.regulon.igraph.format,layout = layout_nicely(Spot42.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=0.8,vertex.size=30,main="Fig 4E",vertex.shape=c("square",rep("circle",nrow(Spot42.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",Spot42.regulon[,3]))),rep("white",length(grep("novel",Spot42.regulon[,3])))))
+```
+4. Create sRNA regulons shown in Fig 5. This figure was created in Cytoscape. Here we use the igraph package to get raw drafts.
+```{r}
+#Load the output files of the Inferelator run for E. coli
+load("../Inferelator_output_files/Ecoli_8sRNAs/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/Ecoli_8sRNAs/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Create table with sRNA-mRNA interactions for all eight sRNAs
+sRNAs<-colnames(IN$priors.mat)[140:147]
+sRNAs.network<-create.network(sRNAs,recovered.interactions.matrix,novel.interactions.matrix)
+#Plot the inferred Spot 42 regulon
+Spot42.regulon<-sRNAs.network[grep("spf",sRNAs.network[,1]),]
+Spot42.regulon.igraph.format<-graph_from_data_frame(Spot42.regulon[,1:2], union(Spot42.regulon[,"Regulator"],Spot42.regulon[,"Target"]), directed = T)
+plot(Spot42.regulon.igraph.format,layout = layout_nicely(Spot42.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=1,vertex.size=30,main="Fig 5A",vertex.shape=c("square",rep("circle",nrow(Spot42.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",Spot42.regulon[,3]))),rep("white",length(grep("novel",Spot42.regulon[,3])))))
+#Plot the inferred GcvB regulon
+GcvB.regulon<-sRNAs.network[grep("gcvB",sRNAs.network[,1]),]
+GcvB.regulon.igraph.format<-graph_from_data_frame(GcvB.regulon[,1:2], union(GcvB.regulon[,"Regulator"],GcvB.regulon[,"Target"]), directed = T)
+plot(GcvB.regulon.igraph.format,layout = layout_nicely(GcvB.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=1,vertex.size=30,main="Fig 5B",vertex.shape=c("square",rep("circle",nrow(GcvB.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",GcvB.regulon[,3]))),rep("white",length(grep("novel",GcvB.regulon[,3])))))
+#Plot the inferred PrrF regulon in P. aeruginosa
+#Load the output files of the Inferelator run for P. aeruginosa
+load("../Inferelator_output_files/PrrF_Paeruginosa/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/PrrF_Paeruginosa/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/PrrF_Paeruginosa/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Create table with PrrF-mRNA interactions 
+PrrF.regulon<-create.network("PrrF",recovered.interactions.matrix,novel.interactions.matrix)
+PrrF.regulon.igraph.format<-graph_from_data_frame(PrrF.regulon[,1:2], union(PrrF.regulon[,"Regulator"],PrrF.regulon[,"Target"]), directed = T)
+plot(PrrF.regulon.igraph.format,layout = layout_nicely(PrrF.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=0.65,vertex.size=30,main="Fig 5C",vertex.shape=c("square",rep("circle",nrow(PrrF.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",PrrF.regulon[,3]))),rep("white",length(grep("novel",PrrF.regulon[,3])))))
+#Plot the inferred FsrA regulon in B. subtilis
+#Load the output files of the Inferelator run for B. subtilis
+load("../Inferelator_output_files/FsrA_Bsubtilis/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/FsrA_Bsubtilis/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/FsrA_Bsubtilis/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Create table with PrrF-mRNA interactions 
+FsrA.regulon<-create.network(FsrA,recovered.interactions.matrix,novel.interactions.matrix)
+#Replace locus ID with common sRNA name
+FsrA.regulon[,1]<-"FsrA"
+FsrA.regulon.igraph.format<-graph_from_data_frame(FsrA.regulon[,1:2], union(FsrA.regulon[,"Regulator"],FsrA.regulon[,"Target"]), directed = T)
+plot(FsrA.regulon.igraph.format,layout = layout_nicely(FsrA.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=0.55,vertex.size=32,main="Fig 5D",vertex.shape=c("square",rep("circle",nrow(FsrA.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",FsrA.regulon[,3]))),rep("white",length(grep("novel",FsrA.regulon[,3])))))
+#Plot the inferred RsaE regulon in S. aureus
+#Load the output files of the Inferelator run for S. aures
+load("../Inferelator_output_files/RsaE_Saureus/betas_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/RsaE_Saureus/combinedconf_frac_tp_100_perm_1--frac_fp_0_perm_1_1.1.RData")
+load("../Inferelator_output_files/RsaE_Saureus/params_and_input.RData")
+#Create final network model
+source("../Miscellaneous_scripts/create_final_networks.R")
+#Create table with RsaE-mRNA interactions 
+RsaE.recovered.targets<-names(which(recovered.interactions.matrix[,RsaE]!=0))
+RsaE.recovered.targets<-sapply(1:length(RsaE.recovered.targets), function(x){gsub("SAOUHSC","SA",RsaE.recovered.targets[x])})
+RsaE.novel.targets<-names(which(novel.interactions.matrix[,RsaE]!=0))
+RsaE.novel.targets<-sapply(1:length(RsaE.novel.targets), function(x){gsub("SAOUHSC","SA",RsaE.novel.targets[x])})
+RsaE.regulon<-rbind(cbind(rep("RsaE",length(RsaE.recovered.targets)),RsaE.recovered.targets,rep("priors",length(RsaE.recovered.targets))),cbind(rep("RsaE",length(RsaE.novel.targets)),RsaE.novel.targets,rep("novel",length(RsaE.novel.targets))))
+colnames(RsaE.regulon)<-c("Regulator","Target","Interaction")
+RsaE.regulon.igraph.format<-graph_from_data_frame(RsaE.regulon[,1:2], union(RsaE.regulon[,"Regulator"],RsaE.regulon[,"Target"]), directed = T)
+plot(RsaE.regulon.igraph.format,layout = layout_nicely(RsaE.regulon.igraph.format), edge.arrow.size =0.4,vertex.label.cex=0.55,vertex.size=32,main="Fig 5E",vertex.shape=c("square",rep("circle",nrow(RsaE.regulon))),vertex.label.color=c("blue",rep("black",length(grep("prior",RsaE.regulon[,3]))),rep("white",length(grep("novel",RsaE.regulon[,3])))))
+```
+
+
